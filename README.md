@@ -155,6 +155,62 @@ client.realtime.on_order_update(on_order_update)
 
 ---
 
+### 9. OCO (One-Cancels-the-Other) Orders
+
+This client provides a **client-side OCO (One-Cancels-the-Other) implementation**. The underlying trading API may not support OCO orders natively. This means the `FuturesDeskClient` places two separate orders (typically a stop-loss and a take-profit) and then monitors their status and the status of the associated position. If one order executes, or if the overall position for the contract is closed, the client will automatically attempt to cancel the other remaining order of the OCO pair.
+
+#### Managing the OCO Polling Service
+
+The client-side OCO functionality relies on a polling service that periodically checks order and position statuses. You need to start this service for OCO orders to be managed:
+
+```python
+# Start the OCO manager (typically after initializing the client)
+# You can optionally specify a polling interval in seconds (default is 10 seconds)
+client.start_oco_manager(polling_interval=5) 
+
+# ... your trading logic ...
+
+# Stop the OCO manager before your application exits
+# This is important to ensure graceful shutdown of the polling thread.
+client.stop_oco_manager()
+```
+
+#### Placing an OCO Order
+
+Here's how to place an OCO order using the client:
+
+```python
+# Example: Placing OCO orders for an existing/intended LONG position on 'CONTRACT_X'
+# Assumes you want to protect a position of size 1.
+# If current price is 100, set SL at 95 and TP at 105.
+try:
+    sl_order_id, tp_order_id, client_oco_id = client.place_oco_order(
+        account_id=YOUR_ACCOUNT_ID, # Replace with your actual account ID
+        contract_id="CONTRACT_X",   # Replace with the actual contract ID
+        position_side=1,  # 1 for Buy/Long position, 2 for Sell/Short position
+        size=1,
+        stop_loss_price=95.0,
+        take_profit_price=105.0,
+        custom_tag_sl="my_sl_order_123", # Optional custom tag for the stop-loss order
+        custom_tag_tp="my_tp_order_123"  # Optional custom tag for the take-profit order
+    )
+    print(f"OCO order placed: SL ID {sl_order_id}, TP ID {tp_order_id}, Managed ID {client_oco_id}")
+except Exception as e:
+    print(f"Error placing OCO order: {e}")
+    # Remember that if the SL leg was placed but TP failed, the exception from
+    # place_oco_order in OrderAPI (and subsequently FuturesDeskClient)
+    # will contain the SL order ID for manual cancellation if needed.
+```
+
+#### Important Caveats
+
+-   **Client-Side Logic:** The OCO management logic runs entirely within your client application. If your application is not running, crashes, or loses internet connectivity, the OCO orders will **not** be managed.
+-   **Polling Delay:** Management of OCO orders depends on the `polling_interval`. There will be a delay (up to the polling interval) between an event (e.g., one leg of the OCO filling, or the position being closed manually) and the client attempting to cancel the corresponding OCO leg.
+-   **API Errors & Rate Limits:** The OCO manager makes API calls to check order/position statuses and to cancel orders. Failures in these API calls (due to network issues, API errors, or rate limits) can affect or delay OCO management.
+-   **No Guarantees:** Due to its client-side nature, polling delays, and potential for API communication failures, this implementation **cannot offer the same guarantees** as native server-side OCO orders. Use with a clear understanding of these limitations.
+
+---
+
 ## Notes
 
 - All API requests require a valid session token, handled automatically after login.
